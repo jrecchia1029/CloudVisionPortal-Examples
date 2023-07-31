@@ -466,7 +466,7 @@
                           for svi in vrf.get('svis', []):
                               # Create L3 vlans
                               config['vlans'][svi['id']] = {
-                                  "tenant": tenant,
+                                  "tenant": tenant['name'],
                                   "name": svi['name']
                               }
                               # Create L3 SVI with helper address pointing towards CVP
@@ -742,7 +742,7 @@
                                           config['vlan_interfaces'][f"Vlan{svi['id']}"]["pim"] = {"ipv4": pim_config_ipv4}
 
                                   # configure eos_cli statements
-                                  config['vlan_interfaces'][f"Vlan{svi['id']}"]['eos_cli'] = svi['eos_cli']
+                                  config['vlan_interfaces'][f"Vlan{svi['id']}"]['eos_cli'] = "\n".join(svi['eos_cli'])
 
                           # configure vrf ibgp mlag peer interface
                           if switch_facts.get('mlag') and vrf.get('enable_mlag_ibgp_peering_vrfs'):
@@ -852,7 +852,7 @@
                                       vlan['import_export_evpn_domains'] = [
                                           {
                                               "domain": "remote",
-                                              "route_target": ":".join(switch_rt) if len(switch_rt) > 0 else None
+                                              "route_target": ":".join(switch_rt) if len(switch_rt) > 0 else []
                                           }
                                       ]
 
@@ -899,9 +899,9 @@
                                           switch_export_rt.append(leaf_rt_segment)
                                           switch_rt = []
 
-                              vlan['route_target'] = ":".join(switch_rt) if len(switch_rt) > 0 else None
-                              vlan['import_route_target'] = ":".join(switch_import_rt) if len(switch_import_rt) > 0 else None
-                              vlan['export_route_target'] = ":".join(switch_export_rt) if len(switch_export_rt) > 0 else None
+                              vlan['route_target'] = ":".join(switch_rt) if len(switch_rt) > 0 else []
+                              vlan['import_route_target'] = ":".join(switch_import_rt) if len(switch_import_rt) > 0 else []
+                              vlan['export_route_target'] = ":".join(switch_export_rt) if len(switch_export_rt) > 0 else []
                               if switch_facts.get('evpn_gateway_vxlan_l2'):
                                   vlan['rd_evpn_domain'] = {
                                       "domain": "remote",
@@ -910,7 +910,7 @@
                                   vlan['import_export_evpn_domains'] = [
                                       {
                                           "domain": "remote",
-                                          "route_target": ":".join(switch_rt) if len(switch_rt) > 0 else None
+                                          "route_target": ":".join(switch_rt) if len(switch_rt) > 0 else []
                                       }
                                   ]
                       # Set vlan_aware_bundles
@@ -939,7 +939,7 @@
                               bundle['import_export_evpn_domains'] = [
                                   {
                                       "domain": "remote",
-                                      "route_target": ":".join(switch_rt) if len(switch_rt) > 0 else None
+                                      "route_target": ":".join(switch_rt) if len(switch_rt) > 0 else []
                                   }
                               ]
 
@@ -957,6 +957,16 @@
                                   if vrf['name'] == "default":
                                       route_distinguisher = None
                                       route_targets = None
+                                  elif vrf['route_target'] == None:
+                                      route_distinguisher = vrf['route_distinguisher']
+                                      route_targets = {
+                                          "import": {
+                                              "evpn": []
+                                          },
+                                          "export": {
+                                              "evpn": []
+                                          }
+                                      }
                                   else:
                                       route_distinguisher = vrf['route_distinguisher']
                                       route_targets = {
@@ -994,7 +1004,7 @@
                                       "ipv6": {"neighbors": {}, "networks": {}}
                                   },
                                   "evpn_multicast": get(vrf, "_evpn_l3_multicast_enabled"),
-                                  "eos_cli": []
+                                  "eos_cli": ""
                               }
                               # get and set mlag peer config
                               if switch_facts.get('mlag') and vrf.get('enable_mlag_ibgp_peering_vrfs'):
@@ -1081,16 +1091,14 @@
                                       "tenant": tenant['name'],
                                       "rd": svi['route_distinguisher'],
                                       "route_targets": {},
-                                      "redistribute_routes": {
-                                          "learned": {}
-                                      }
+                                      "redistribute_routes": ["learned"]
                                   }
                                   if svi.get('rd_evpn_domain'):
                                       config['router_bgp']['vlans'][svi['id']]['rd_evpn_domain'] = svi['rd_evpn_domain']
                                   # Set route targets
-                                  config['router_bgp']['vlans'][svi['id']]['route_targets']['both'] = [svi['route_target']] if svi.get('route_target') else None
-                                  config['router_bgp']['vlans'][svi['id']]['route_targets']['import'] = [svi['import_route_target']] if svi.get('import_route_target') else None
-                                  config['router_bgp']['vlans'][svi['id']]['route_targets']['export'] = [svi['export_route_target']] if svi.get('export_route_target') else None
+                                  config['router_bgp']['vlans'][svi['id']]['route_targets']['both'] = [svi['route_target']] if svi.get('route_target') else []
+                                  config['router_bgp']['vlans'][svi['id']]['route_targets']['import'] = [svi['import_route_target']] if svi.get('import_route_target') else []
+                                  config['router_bgp']['vlans'][svi['id']]['route_targets']['export'] = [svi['export_route_target']] if svi.get('export_route_target') else []
                                   if svi.get('import_export_evpn_domains'):
                                       config['router_bgp']['vlans'][svi['id']]['route_targets']['import_export_evpn_domains'] = svi['import_export_evpn_domains']
 
@@ -1109,16 +1117,14 @@
                                   "tenant": tenant['name'],
                                   "rd": l2vlan['route_distinguisher'],
                                   "route_targets": {},
-                                  "redistribute_routes": {
-                                      "learned": {}
-                                  }
+                                  "redistribute_routes": ["learned"]
                               }
                               if l2vlan.get('rd_evpn_domain'):
                                   config['router_bgp']['vlans'][l2vlan['id']]['rd_evpn_domain'] = l2vlan['rd_evpn_domain']
                               # Set route targets
-                              config['router_bgp']['vlans'][l2vlan['id']]['route_targets']['both'] = [l2vlan['route_target']] if l2vlan.get('route_target') else None
-                              config['router_bgp']['vlans'][l2vlan['id']]['route_targets']['import'] = [l2vlan['import_route_target']] if l2vlan.get('import_route_target') else None
-                              config['router_bgp']['vlans'][l2vlan['id']]['route_targets']['export'] = [l2vlan['export_route_target']] if l2vlan.get('export_route_target') else None
+                              config['router_bgp']['vlans'][l2vlan['id']]['route_targets']['both'] = [l2vlan['route_target']] if l2vlan.get('route_target') else []
+                              config['router_bgp']['vlans'][l2vlan['id']]['route_targets']['import'] = [l2vlan['import_route_target']] if l2vlan.get('import_route_target') else []
+                              config['router_bgp']['vlans'][l2vlan['id']]['route_targets']['export'] = [l2vlan['export_route_target']] if l2vlan.get('export_route_target') else []
                               if l2vlan.get('import_export_evpn_domains'):
                                   config['router_bgp']['vlans'][l2vlan['id']]['route_targets']['import_export_evpn_domains'] = l2vlan['import_export_evpn_domains']
 
@@ -1130,9 +1136,7 @@
                                       "both": [bundle['route_target']]
                                   },
                                   "vlan": bundle['vlan_range'],
-                                  "redistribute_routes": [
-                                      "learned"
-                                  ]
+                                  "redistribute_routes": ["learned"]
                               }
                               if bundle.get('rd_evpn_domain'):
                                   config['router_bgp']['vlan_aware_bundles'][bundle['name']]['rd_evpn_domain'] = bundle['rd_evpn_domain']
@@ -1848,8 +1852,7 @@
                                   if l3_interface.get("mtu"):
                                       interface["mtu"] = l3_interface["mtu"]
                                   if len(l3_interface.get("eosCli", [])) > 0:
-                                      interface["raw_eos_cli"] = l3_interface["eosCli"]
-                                      # interface["raw_eos_cli"] = "\n".join(l3_interface["eosCli"])  # will use this method when extended text input type is available
+                                      interface["raw_eos_cli"] = "\n".join(l3_interface["eosCli"])  # will use this method when extended text input type is available
                                   # Check ospf
                                   if l3_interface.get("ospf"):
                                       ospf = {
@@ -1910,8 +1913,6 @@
                                           peer['update_source'] = bgp_peer['updateSource']
                                       if bgp_peer.get('ebgpMultihop'):
                                           peer['ebgp_multihop'] = bgp_peer['ebgpMultihop']
-
-                                      peer['nodes'] = [device_id]
 
                                       if bgp_peer.get('nextHop') and bgp_peer['nextHop'].get('iPv4NextHop', '').strip() != "":
                                           peer['set_ipv4_next_hop'] = bgp_peer['nextHop']['iPv4NextHop']
