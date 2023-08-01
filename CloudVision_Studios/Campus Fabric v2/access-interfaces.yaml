@@ -14,6 +14,7 @@
           import json
           import os
           import re
+          import pyavd
           import tagsearch_python.tagsearch_pb2_grpc as tsgr
           import tagsearch_python.tagsearch_pb2 as tspb
           from arista.tag.v2.tag_pb2 import Tag, \
@@ -1065,7 +1066,7 @@
                       if port_profile["stormControl"]["unknownUnicast"].get("level", "").strip():
                           tmp_port_profile["storm_control"]["unknown_unicast"] = {
                               "level": port_profile["stormControl"]["unknownUnicast"]["level"],
-                              "unit":  port_profile["stormControl"]["unknownUnicast"].get("unit", "percent")
+                              "unit":  port_profile["stormControl"]["unknown_unicast"].get("unit", "percent")
                           }
                   # EOS CLI
                   if len(port_profile.get("eosCli", [])) > 0:
@@ -1768,388 +1769,18 @@
           # Get structured config for port_channel_interfaces
           my_switch_port_channel_interfaces = port_channel_interfaces(network_ports)
 
-          config = {
+          structured_config = {
+              "generate_default_config": False,
+              "hostname": my_switch_facts["hostname"],
               "ethernet_interfaces": convert_dicts(my_switch_ethernet_interfaces),
-              "port_channel_interfaces": convert_dicts(my_switch_port_channel_interfaces)
+              "port_channel_interfaces": convert_dicts(my_switch_port_channel_interfaces),
           }
 
-          ctx.info(f"Structured Config: {config}")
+          config = pyavd.get_device_config(structured_config)
           %>
-          ## port-channel interfaces
-          % for port_channel_interface in natural_sort(config.get("port_channel_interfaces")):
-          interface ${ port_channel_interface["name"] }
-          %     if port_channel_interface.get("description"):
-             description ${ port_channel_interface["description"] }
-          %     endif
-          %     if port_channel_interface.get("shutdown", False) is True:
-             shutdown
-          %     elif port_channel_interface.get("shutdown", True) is False:
-             no shutdown
-          %     endif
-          %     if port_channel_interface.get("mtu"):
-             mtu ${ port_channel_interface["mtu"] }
-          %     endif
-          %     if port_channel_interface.get("mode", "") in ['access', 'dot1q-tunnel']:
-          %         if port_channel_interface.get("vlans"):
-             switchport access vlan ${ port_channel_interface["vlans"] }
-          %         endif
-          %     endif
-          %     if port_channel_interface.get("mode", "") in ['trunk', 'trunk phone']:
-          %         if port_channel_interface.get("native_vlan_tag", False) is True:
-             switchport trunk native vlan tag
-          %         elif port_channel_interface.get("native_vlan"):
-             switchport trunk native vlan ${ port_channel_interface["native_vlan"] }
-          %         endif
-          %     endif
-          %     if port_channel_interface.get("phone", {}).get("vlan"):
-             switchport phone vlan ${ port_channel_interface["phone"]["vlan"] }
-          %     endif
-          %     if port_channel_interface.get("phone", {}).get("trunk"):
-             switchport phone trunk ${ port_channel_interface["phone"]["trunk"] }
-          %     endif
-          %     if port_channel_interface.get("mode") in ['trunk', 'trunk phone']:
-          %         if port_channel_interface.get("vlans"):
-             switchport trunk allowed vlan ${ port_channel_interface["vlans"] }
-          %         endif
-          %     endif
-          %     if port_channel_interface.get("mode"):
-             switchport mode ${ port_channel_interface["mode"] }
-          %     endif
-          %     if port_channel_interface.get("type") == 'routed':
-             no switchport
-          %     else:
-             switchport
-          %     endif
-          %     if port_channel_interface.get("lacp_id"):
-             lacp system-id ${ port_channel_interface["lacp_id"] }
-          %     endif
-          %     if port_channel_interface.get("mlag"):
-             mlag ${ port_channel_interface["mlag"] }
-          %     endif
-          %     if port_channel_interface.get("lacp_fallback_timeout"):
-             port-channel lacp fallback timeout ${ port_channel_interface["lacp_fallback_timeout"] }
-          %     endif
-          %     if port_channel_interface.get("lacp_fallback_mode"):
-             port-channel lacp fallback ${ port_channel_interface["lacp_fallback_mode"] }
-          %     endif
-          %     for section in natural_sort(port_channel_interface.get("storm_control")):
-          %         if port_channel_interface["storm_control"][section].get("level"):
-          %             if port_channel_interface["storm_control"][section].get("unit", "") == 'pps':
-             storm-control ${ section.replace("_", "-") } level pps ${ port_channel_interface["storm_control"][section]["level"] }
-          %             else:
-             storm-control ${ section.replace("_", "-") } level ${ port_channel_interface["storm_control"][section]["level"] }
-          %             endif
-          %         endif
-          %     endfor
-          %     if port_channel_interface.get("ptp"):
-          %         if port_channel_interface["ptp"].get("enable", False) is True:
-             ptp enable
-          %         endif
-          %         if port_channel_interface["ptp"].get("sync_message", {}).get("interval") is not None:
-             ptp sync-message interval ${ port_channel_interface["ptp"]["sync_message"]["interval"] }
-          %         endif
-          %         if port_channel_interface["ptp"].get("delay_mechanism") is not None:
-             ptp delay-mechanism ${ port_channel_interface["ptp"]["delay_mechanism"] }
-          %         endif
-          %         if port_channel_interface["ptp"].get("announce", {}).get("interval") is not None:
-             ptp announce interval ${ port_channel_interface["ptp"]["announce"]["interval"] }
-          %         endif
-          %         if port_channel_interface["ptp"].get("transport"):
-             ptp transport ${ port_channel_interface["ptp"]["transport"] }
-          %         endif
-          %         if port_channel_interface["ptp"].get("announce", {}).get("timeout") is not None:
-             ptp announce timeout ${ port_channel_interface["ptp"]["announce"]["timeout"] }
-          %         endif
-          %         if port_channel_interface["ptp"].get("delay_req") is not None:
-             ptp delay-req interval ${ port_channel_interface["ptp"]["delay_req"] }
-          %         endif
-          %         if port_channel_interface["ptp"].get("role"):
-             ptp role ${ port_channel_interface["ptp"].get("role") }
-          %         endif
-          %         if port_channel_interface["ptp"].get("vlan"):
-             ptp vlan ${ port_channel_interface["ptp"]["vlan"] }
-          %         endif
-          %     endif
-          %     if port_channel_interface.get("service_profile"):
-             service-profile ${ port_channel_interface["service_profile"] }
-          %     endif
-          %     if port_channel_interface.get("spanning_tree_portfast", "") == 'edge':
-             spanning-tree portfast
-          %     elif port_channel_interface.get("spanning_tree_portfast") == 'network':
-             spanning-tree portfast network
-          %     endif
-          %     if port_channel_interface.get("spanning_tree_bpduguard") in [True, "True", "enabled"]:
-             spanning-tree bpduguard enable
-          %     elif port_channel_interface.get("spanning_tree_bpduguard", "") == "disabled":
-             spanning-tree bpduguard disable
-          %     endif
-          %     if port_channel_interface.get("spanning_tree_bpdufilter") in [True, "True", "enabled"]:
-             spanning-tree bpdufilter enable
-          %     elif port_channel_interface.get("spanning_tree_bpdufilter") == "disabled":
-             spanning-tree bpdufilter disable
-          %     endif
-          %     if port_channel_interface.get("spanning_tree_guard"):
-          %         if port_channel_interface["spanning_tree_guard"] == 'disabled':
-             spanning-tree guard none
-          %         else:
-             spanning-tree guard ${ port_channel_interface["spanning_tree_guard"] }
-          %         endif
-          %     endif
-          %     for cli_statement in port_channel_interface.get("eos_cli", "").split("\n"):
-             ${cli_statement}
-          %     endfor
-          !
-          % endfor
-          ## eos - ethernet interfaces ##
-          <% print_ethernet = False %>
-          % for ethernet_interface in natural_sort(config.get("ethernet_interfaces")):
-          %     if ethernet_interface.get("channel_group", {}).get("id") and ethernet_interface.get("channel_group", {}).get("mode"):
-          <%        port_channel_interface_name = f"Port-Channel{ethernet_interface['channel_group']['id']}" %>
-          ##%         if port_channel_interfaces | arista.avd.default([]) |
-          ##                                        arista.avd.convert_dicts('name') |
-          ##                                        selectattr('name', 'arista.avd.defined', port_channel_interface_name) |
-          ##                                        selectattr('lacp_fallback_mode', 'arista.avd.defined', 'individual') |
-          ##                                        length > 0 %}
-          ##<%            print_ethernet = True %>
-          ##%         endif
-          %     else:
-          <%        print_ethernet = True %>
-          %     endif
-          interface ${ ethernet_interface["name"] }
-          %     if print_ethernet is True:
-          %         if ethernet_interface.get("profile"):
-             profile ${ ethernet_interface["profile"] }
-          %         endif
-          %     endif
-          %     if ethernet_interface.get("description"):
-             description ${ ethernet_interface["description"] }
-          %     endif
-          %     if ethernet_interface.get("shutdown", False) is True:
-             shutdown
-          %     elif ethernet_interface.get("shutdown", True) is False:
-             no shutdown
-          %     endif
-          %     if print_ethernet is True:
-          %         if ethernet_interface.get("mtu"):
-             mtu ${ ethernet_interface["mtu"] }
-          %         endif
-          %     endif
-          %     if print_ethernet:
-          %         if ethernet_interface.get("flowcontrol", {}).get("received"):
-             flowcontrol receive ${ ethernet_interface["flowcontrol"]["received"] }
-          %         endif
-          %     endif
-          %     if ethernet_interface.get("speed"):
-             speed ${ ethernet_interface["speed"] }
-          %     endif
-          %     if print_ethernet:
-          %         if ethernet_interface.get("mode", "") in ['access', 'dot1q-tunnel']:
-          %             if ethernet_interface.get("vlans"):
-             switchport access vlan ${ ethernet_interface["vlans"] }
-          %             endif
-          %         endif
-          %         if ethernet_interface.get("mode", "") in ['trunk', 'trunk phone']:
-          %             if ethernet_interface.get("native_vlan_tag", False) is True:
-             switchport trunk native vlan tag
-          %             elif ethernet_interface.get("native_vlan"):
-             switchport trunk native vlan ${ ethernet_interface["native_vlan"] }
-          %             endif
-          %         endif
-          %         if ethernet_interface.get("phone", {}).get("vlan"):
-             switchport phone vlan ${ ethernet_interface["phone"]["vlan"] }
-          %         endif
-          %         if ethernet_interface.get("phone", {}).get("trunk"):
-             switchport phone trunk ${ ethernet_interface["phone"]["trunk"] }
-          %         endif
-          %         if ethernet_interface.get("mode") in ['trunk', 'trunk phone']:
-          %             if ethernet_interface.get("vlans"):
-             switchport trunk allowed vlan ${ ethernet_interface["vlans"] }
-          %             endif
-          %         endif
-          %         if ethernet_interface.get("mode"):
-             switchport mode ${ ethernet_interface["mode"] }
-          %         endif
-          %         if ethernet_interface.get("type") == 'routed':
-             no switchport
-          %         else:
-             switchport
-          %         endif
-          %     endif
-          %     if ethernet_interface.get("dot1x"):
-          %         if ethernet_interface["dot1x"].get("pae", {}).get("mode"):
-             dot1x pae ${ ethernet_interface["dot1x"]["pae"]["mode"] }
-          %         endif
-          %         if ethernet_interface["dot1x"].get("authentication_failure"):
-          %             if ethernet_interface["dot1x"]["authentication_failure"].get("action") == 'allow' and ethernet_interface["dot1x"]["authentication_failure"].get("allow_vlan"):
-             dot1x authentication failure action traffic allow vlan ${ ethernet_interface["dot1x"]["authentication_failure"]["allow_vlan"] }
-          %             elif ethernet_interface["dot1x"]["authentication_failure"]["action"] == 'drop':
-             dot1x authentication failure action traffic drop
-          %             endif
-          %         endif
-          %         if ethernet_interface["dot1x"].get("reauthentication", False) is True:
-             dot1x reauthentication
-          %         endif
-          %         if ethernet_interface["dot1x"].get("port_control"):
-             dot1x port-control ${ ethernet_interface["dot1x"]["port_control"] }
-          %         endif
-          %         if ethernet_interface["dot1x"].get("port_control_force_authorized_phone", False) is True:
-             dot1x port-control force-authorized phone
-          %         elif ethernet_interface["dot1x"].get("port_control_force_authorized_phone", True) is False:
-             no dot1x port-control force-authorized phone
-          %         endif
-          %         if ethernet_interface["dot1x"].get("host_mode"):
-          %             if ethernet_interface["dot1x"]["host_mode"].get("mode", "") == 'single-host':
-             dot1x host-mode single-host
-          %             elif ethernet_interface["dot1x"]["host_mode"].get("mode", "") == 'multi-host':
-          <%            host_mode_cli = "dot1x host-mode multi-host" %>
-          %             if ethernet_interface["dot1x"]["host_mode"].get("multi_host_authenticated", False) is True:
-          <%                host_mode_cli = host_mode_cli + " authenticated" %>
-          %             endif
-             ${ host_mode_cli }
-          %             endif
-          %         endif
-          %         if ethernet_interface["dot1x"].get("mac_based_authentication", {}).get("enabled", False) is True:
-          %             if ethernet_interface["dot1x"]["mac_based_authentication"].get("host_mode_common", False) is True:
-             dot1x mac based authentication host-mode common
-          %             if ethernet_interface["dot1x"]["mac_based_authentication"].get("always", False) is True:
-             dot1x mac based authentication always
-          %             endif
-          %             else:
-          <%            auth_cli = "dot1x mac based authentication" %>
-          %             if ethernet_interface["dot1x"]["mac_based_authentication"].get("always", False) is True:
-          <%                auth_cli = auth_cli + " always" %>
-          %             endif
-             ${ auth_cli }
-          %             endif
-          %         endif
-          %         if ethernet_interface["dot1x"].get("timeout"):
-          %             if ethernet_interface["dot1x"]["timeout"].get("quiet_period"):
-             dot1x timeout quiet-period ${ ethernet_interface["dot1x"]["timeout"]["quiet_period"] }
-          %             endif
-          %             if ethernet_interface["dot1x"]["timeout"].get("reauth_timeout_ignore", False) is True:
-             dot1x timeout reauth-timeout-ignore always
-          %             endif
-          %             if ethernet_interface["dot1x"]["timeout"].get("tx_period"):
-             dot1x timeout tx-period ${ ethernet_interface["dot1x"]["timeout"]["tx_period"] }
-          %             endif
-          %             if ethernet_interface["dot1x"]["timeout"].get("reauth_period"):
-             dot1x timeout reauth-period ${ ethernet_interface["dot1x"]["timeout"]["reauth_period"] }
-          %             endif
-          %             if ethernet_interface["dot1x"]["timeout"].get("idle_host"):
-             dot1x timeout idle-host ${ ethernet_interface["dot1x"]["timeout"]["idle_host"] } seconds
-          %             endif
-          %         endif
-          %         if ethernet_interface["dot1x"].get("reauthorization_request_limit"):
-             dot1x reauthorization request limit ${ ethernet_interface["dot1x"]["reauthorization_request_limit"] }
-          %         endif
-          %         if ethernet_interface["dot1x"].get("eapol"):
-          %             if ethernet_interface["dot1x"]["eapol"].get("disabled", False) is True:
-             dot1x eapol disabled
-          %             elif ethernet_interface["dot1x"]["eapol"].get("authentication_failure_fallback_mba", {}).get("enabled", False) is True:
-          <%            auth_failure_fallback_mba = "dot1x eapol authentication failure fallback mba" %>
-          %             if ethernet_interface["dot1x"]["eapol"]["authentication_failure_fallback_mba"].get("timeout"):
-          <%                auth_failure_fallback_mba = auth_failure_fallback_mba + " timeout " + ethernet_interface["dot1x"]["eapol"]["authentication_failure_fallback_mba"]["timeout"] %>
-          %             endif
-             ${ auth_failure_fallback_mba }
-          %             endif
-          %         endif
-          %     endif
-          %     if ethernet_interface.get("channel_group", {}).get("id") and ethernet_interface.get("channel_group", {}).get("mode"):
-             channel-group ${ ethernet_interface["channel_group"]["id"] } mode ${ ethernet_interface["channel_group"]["mode"] }
-          %         if ethernet_interface.get("lacp_timer", {}).get("mode"):
-             lacp timer ${ ethernet_interface["lacp_timer"]["mode"] }
-          %         endif
-          %         if ethernet_interface.get("lacp_timer", {}).get("multiplier"):
-             lacp timer multiplier ${ ethernet_interface["lacp_timer"]["multiplier"] }
-          %         endif
-          %         if ethernet_interface.get("lacp_port_priority"):
-             lacp port-priority ${ ethernet_interface["lacp_port_priority"] }
-          %         endif
-          %     endif
-          %     if ethernet_interface.get("poe"):
-          %         if ethernet_interface["poe"].get("priority"):
-             poe priority ${ ethernet_interface["poe"]["priority"] }
-          %         endif
-          %         if ethernet_interface["poe"].get("reboot", {}).get("action"):
-             poe reboot action ${ ethernet_interface["poe"]["reboot"]["action"] }
-          %         endif
-          %         if ethernet_interface["poe"].get("link_down", {}).get("action"):
-             poe link down action ${ ethernet_interface["poe"]["link_down"]["action"] }
-          %         endif
-          %         if ethernet_interface["poe"].get("shutdown", {}).get("action"):
-             poe shutdown action ${ ethernet_interface["poe"]["shutdown"]["action"] }
-          %         endif
-          %     endif
-          %     if print_ethernet:
-          %         for section in natural_sort(ethernet_interface.get("storm_control")):
-          %             if ethernet_interface["storm_control"][section].get("level"):
-          %                 if ethernet_interface["storm_control"][section].get("unit", "") == 'pps':
-             storm-control ${ section.replace("_", "-") } level pps ${ ethernet_interface["storm_control"][section]["level"] }
-          %                 else:
-             storm-control ${ section.replace("_", "-") } level ${ ethernet_interface["storm_control"][section]["level"] }
-          %                 endif
-          %             endif
-          %         endfor
-          %         if ethernet_interface.get("ptp"):
-          %             if ethernet_interface["ptp"].get("enable", False) is True:
-             ptp enable
-          %             endif
-          %             if ethernet_interface["ptp"].get("sync_message", {}).get("interval") is not None:
-             ptp sync-message interval ${ ethernet_interface["ptp"]["sync_message"]["interval"] }
-          %             endif
-          %             if ethernet_interface["ptp"].get("delay_mechanism") is not None:
-             ptp delay-mechanism ${ ethernet_interface["ptp"]["delay_mechanism"] }
-          %             endif
-          %             if ethernet_interface["ptp"].get("announce", {}).get("interval") is not None:
-             ptp announce interval ${ ethernet_interface["ptp"]["announce"]["interval"] }
-          %             endif
-          %             if ethernet_interface["ptp"].get("transport"):
-             ptp transport ${ ethernet_interface["ptp"]["transport"] }
-          %             endif
-          %             if ethernet_interface["ptp"].get("announce", {}).get("timeout") is not None:
-             ptp announce timeout ${ ethernet_interface["ptp"]["announce"]["timeout"] }
-          %             endif
-          %             if ethernet_interface["ptp"].get("delay_req") is not None:
-             ptp delay-req interval ${ ethernet_interface["ptp"]["delay_req"] }
-          %             endif
-          %             if ethernet_interface["ptp"].get("role"):
-             ptp role ${ ethernet_interface["ptp"].get("role") }
-          %             endif
-          %             if ethernet_interface["ptp"].get("vlan"):
-             ptp vlan ${ ethernet_interface["ptp"]["vlan"] }
-          %             endif
-          %         endif
-          %         if ethernet_interface.get("service_profile"):
-             service-profile ${ ethernet_interface["service_profile"] }
-          %         endif
-          %         if ethernet_interface.get("spanning_tree_portfast", "") == 'edge':
-             spanning-tree portfast
-          %         elif ethernet_interface.get("spanning_tree_portfast") == 'network':
-             spanning-tree portfast network
-          %         endif
-          %         if ethernet_interface.get("spanning_tree_bpduguard") in [True, "True", "enabled"]:
-             spanning-tree bpduguard enable
-          %         elif ethernet_interface.get("spanning_tree_bpduguard", "") == "disabled":
-             spanning-tree bpduguard disable
-          %         endif
-          %         if ethernet_interface.get("spanning_tree_bpdufilter") in [True, "True", "enabled"]:
-             spanning-tree bpdufilter enable
-          %         elif ethernet_interface.get("spanning_tree_bpdufilter") == "disabled":
-             spanning-tree bpdufilter disable
-          %         endif
-          %         if ethernet_interface.get("spanning_tree_guard"):
-          %             if ethernet_interface["spanning_tree_guard"] == 'disabled':
-             spanning-tree guard none
-          %             else:
-             spanning-tree guard ${ ethernet_interface["spanning_tree_guard"] }
-          %             endif
-          %         endif
-          %     endif
-          %     for cli_statement in ethernet_interface.get("eos_cli", "").split("\n"):
-             ${cli_statement}
-          %     endfor
-          !
-          % endfor
+          % if config:
+          ${config}
+          % endif
       input_schema:
         fields:
           values:
@@ -2969,8 +2600,8 @@
                     - portProfileDot1XTxPeriod
             portProfileDot1XReauthRequestLimit:
               id: portProfileDot1XReauthRequestLimit
-              name: reauthorizationRequestLimit
-              label: Reauthorization Request Limit
+              name: reauthenticationRequestLimit
+              label: Reauthentication Request Limit
               description: ''
               required: false
               type: INPUT_FIELD_TYPE_INTEGER
@@ -3932,7 +3563,6 @@
                   values:
                     - Allow
                     - Drop
-                    - Disable
                 format: null
                 length: null
                 pattern: null
@@ -4152,8 +3782,8 @@
                     - adapterDot1XTxPeriod
             adapterDot1XReauthRequestLimit:
               id: adapterDot1XReauthRequestLimit
-              name: reauthorizationRequestLimit
-              label: Reauthorization Request Limit
+              name: reauthenticationRequestLimit
+              label: Reauthentication Request Limit
               description: ''
               required: false
               type: INPUT_FIELD_TYPE_INTEGER
