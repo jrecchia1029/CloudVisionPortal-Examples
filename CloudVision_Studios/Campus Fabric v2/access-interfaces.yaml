@@ -12,384 +12,17 @@
         body: |
           <%
           import json
-          import os
-          import re
           import pyavd
+          import re
           import tagsearch_python.tagsearch_pb2_grpc as tsgr
-          import tagsearch_python.tagsearch_pb2 as tspb
-          from arista.tag.v2.tag_pb2 import Tag, \
-              TagKey, \
-              TagAssignment, \
-              TagAssignmentKey, \
-              TagAssignmentConfig
-          from collections import ChainMap
-          from copy import deepcopy
-          try:
-              from deepmerge import Merger
-          except ImportError as imp_exc:
-              DEEPMERGE_IMPORT_ERROR = imp_exc
-          else:
-              DEEPMERGE_IMPORT_ERROR = None
-
-          default_platform_settings = [
-              {
-                  "platforms": ['default'],
-                  "reload_delay": {
-                      "mlag": 300,
-                      "non_mlag": 330
-                  },
-                  "feature_support": {
-                      # "queue-monitor length notify" is only valid for R-Series so should be disabled on default platform.
-                      "queue_monitor_length_notify": False
-                  }
-              },
-              {
-                  "platforms": ['7050X3'],
-                  # Only applied when enabling EVPN multicast
-                  "trident_forwarding_table_partition": "flexible exact-match 16384 l2-shared 98304 l3-shared 131072",
-                  "reload_delay": {
-                      "mlag": 300,
-                      "non_mlag": 330
-                  },
-                  "feature_support": {
-                      # "queue-monitor length notify" is only valid for R-Series so should be disabled on default platform.
-                      "queue_monitor_length_notify": False
-                  }
-              },
-              {
-                  "platforms": ['720XP', '722XP'],
-                  # Only applied when enabling EVPN multicast
-                  "trident_forwarding_table_partition": "flexible exact-match 16384 l2-shared 98304 l3-shared 131072",
-                  "reload_delay": {
-                      "mlag": 300,
-                      "non_mlag": 330
-                  },
-                  "feature_support": {
-                      # "queue-monitor length notify" is only valid for R-Series so should be disabled on default platform.
-                      "queue_monitor_length_notify": False,
-                      "phone": True,
-                      "poe": True
-                  }
-              },
-              {
-                  "platforms": ['755', '758'],
-                  # Only applied when enabling EVPN multicast
-                  "trident_forwarding_table_partition": "flexible exact-match 16384 l2-shared 98304 l3-shared 131072",
-                  "reload_delay": {
-                      "mlag": 300,
-                      "non_mlag": 330
-                  },
-                  "feature_support": {
-                      # "queue-monitor length notify" is only valid for R-Series so should be disabled on default platform.
-                      "queue_monitor_length_notify": False,
-                      "poe": True
-                  }
-              },
-              {
-                  "platforms": ['7280R', '7280R2', '7020R'],
-                  "tcam_profile": "vxlan-routing",
-                  "lag_hardware_only": True,
-                  "reload_delay": {
-                      "mlag": 900,
-                      "non_mlag": 1020
-                  }
-              },
-              {
-                  "platforms": ['7280R3'],
-                  "reload_delay": {
-                      "mlag": 900,
-                      "non_mlag": 1020
-                  }
-              },
-              {
-                  "platforms": ['7500R', '7500R2'],
-                  "tcam_profile": "vxlan-routing",
-                  "lag_hardware_only": True,
-                  "management_interface": "Management0",
-                  "reload_delay": {
-                      "mlag": 900,
-                      "non_mlag": 1020
-                  }
-              },
-              {
-                  "platforms": ['7500R3', '7800R3'],
-                  "management_interface": "Management0",
-                  "reload_delay": {
-                      "mlag": 900,
-                      "non_mlag": 1020
-                  }
-              },
-              {
-                  "platforms": ['7368X4'],
-                  "management_interface": "Management0",
-                  "reload_delay": {
-                      "mlag": 300,
-                      "non_mlag": 330
-                  }
-              },
-              {
-                  "platforms": ['7300X3'],
-                  "management_interface": "Management0",
-                  # Only applied when enabling EVPN multicast
-                  "trident_forwarding_table_partition": "flexible exact-match 16384 l2-shared 98304 l3-shared 131072",
-                  "reload_delay": {
-                      "mlag": 1200,
-                      "non_mlag": 1320
-                  }
-              },
-              {
-                  "platforms": ['VEOS', 'VEOS-LAB', 'vEOS', 'vEOS-lab'],
-                  "reload_delay": {
-                      "mlag": 300,
-                      "non_mlag": 330
-                  },
-                  "feature_support": {
-                      # "queue-monitor length notify" is only valid for R-Series so should be disabled on default platform.
-                      "queue_monitor_length_notify": False,
-                      "interface_storm_control": False
-                  }
-              },
-              {
-                  "platforms": ['CEOS', 'cEOS', 'ceos', 'cEOSLab'],
-                  "management_interface": "Management0",
-                  "reload_delay": {
-                      "mlag": 300,
-                      "non_mlag": 330
-                  },
-                  "feature_support": {
-                      # "queue-monitor length notify" is only valid for R-Series so should be disabled on default platform.
-                      "queue_monitor_length_notify": False,
-                      "interface_storm_control": False
-                  }
-              }
-          ]
 
 
-          ptp_profiles = [
-              {
-                  "profile": "aes67-r16-2016",
-                  "announce": {
-                      "interval": 0,
-                      "timeout": 3,
-                  },
-                  "delay_req": -3,
-                  "sync_message": {
-                      "interval": -3
-                  },
-                  "transport": "ipv4"
-              },
-              {
-                  "profile": "smpte2059-2",
-                  "announce": {
-                      "interval": -2,
-                      "timeout": 3,
-                  },
-                  "delay_req": -4,
-                  "sync_message": {
-                      "interval": -4
-                  },
-                  "transport": "ipv4"
-              },
-              {
-                  "profile": "aes67",
-                  "announce": {
-                      "interval": 2,
-                      "timeout": 3,
-                  },
-                  "delay_req": 0,
-                  "sync_message": {
-                      "interval": 0
-                  },
-                  "transport": "ipv4"
-              }
-          ]
-
-
-          def defined(value, test_value=None, var_type=None, fail_action=None, var_name=None, run_tests=False):
-              if value in [None, "", {}, []]:
-                  return False
-              else:
-                  # Valid value and is matching optional argument if provided - return true
+          def str_to_bool(text):
+              if str(text).strip().lower() in ["enable", "enabled", "yes"]:
                   return True
-
-
-          def convert_dicts(dictionary, primary_key="name", secondary_key=None):
-              """
-              The `arista.avd.convert_dicts` filter will convert a dictionary containing nested dictionaries to a list of
-              dictionaries. It inserts the outer dictionary keys into each list item using the primary_key `name` (key name is
-              configurable) and if there is a non-dictionary value,it inserts this value to
-              secondary key (key name is configurable), if secondary key is provided.
-              This filter is intended for:
-              - Seemless data model migration from dictionaries to lists.
-              - Improve Ansible's processing performance when dealing with large dictionaries by converting them to lists of dictionaries.
-              Note: If there is a non-dictionary value with no secondary key provided, it will pass through untouched
-              To use this filter:
-              ```jinja
-              {# convert list of dictionary with default `name:` as the primary key and None secondary key #}
-              {% set example_list = example_dictionary | arista.avd.convert_dicts %}
-              {% for example_item in example_list %}
-              item primary key is {{ example_item.name }}
-              {% endfor %}
-              {# convert list of dictionary with `id:` set as the primary key and `types:` set as the secondary key #}
-              {% set example_list = example_dictionary | arista.avd.convert_dicts('id','types') %}
-              {% for example_item in example_list %}
-              item primary key is {{ example_item.id }}
-              item secondary key is {{ example_item.types }}
-              {% endfor %}
-              ```
-              Parameters
-              ----------
-              dictionary : any
-                  Nested Dictionary to convert - returned untouched if not a nested dictionary and list
-              primary_key : str, optional
-                  Name of primary key used when inserting outer dictionary keys into items.
-              secondary_key : str, optional
-                  Name of secondary key used when inserting dictionary values which are list into items.
-              Returns
-              -------
-              any
-                  Returns list of dictionaries or input variable untouched if not a nested dictionary/list.
-              """
-              if not isinstance(dictionary, (dict, list)) or os.environ.get("AVD_DISABLE_CONVERT_DICTS"):
-                  # Not a dictionary/list, return the original
-                  return dictionary
-              elif isinstance(dictionary, list):
-                  output = []
-                  for element in dictionary:
-                      if not isinstance(element, dict):
-                          item = {}
-                          item.update({primary_key: element})
-                          output.append(item)
-                      elif primary_key not in element and secondary_key is not None:
-                          # if element of nested dictionary is a dictionary but primary key is missing, insert primary and secondary keys.
-                          for key in element:
-                              output.append(
-                                  {
-                                      primary_key: key,
-                                      secondary_key: element[key],
-                                  }
-                              )
-                      else:
-                          output.append(element)
-                  return output
-              else:
-                  output = []
-                  for key in dictionary:
-                      if secondary_key is not None:
-                          # Add secondary key for the values if secondary key is provided
-                          item = {}
-                          item.update({primary_key: key})
-                          item.update({secondary_key: dictionary[key]})
-                          output.append(item)
-                      else:
-                          if not isinstance(dictionary[key], dict):
-                              # Not a nested dictionary
-                              output.append({primary_key: key})
-                          else:
-                              # Nested dictionary
-                              item = dictionary[key].copy()
-                              item.update({primary_key: key})
-                              output.append(item)
-                  return output
-
-
-          def get(dictionary, key, default=None, required=False, org_key=None, separator="."):
-              """
-              Get a value from a dictionary or nested dictionaries.
-              Key supports dot-notation like "foo.bar" to do deeper lookups.
-              Returns the supplied default value or None if the key is not found and required is False.
-              Parameters
-              ----------
-              dictionary : dict
-                  Dictionary to get key from
-              key : str
-                  Dictionary Key - supporting dot-notation for nested dictionaries
-              default : any
-                  Default value returned if the key is not found
-              required : bool
-                  Fail if the key is not found
-              org_key : str
-                  Internal variable used for raising exception with the full key name even when called recursively
-              separator: str
-                  String to use as the separator parameter in the split function. Useful in cases when the key
-                  can contain variables with "." inside (e.g. hostnames)
-              Returns
-              -------
-              any
-                  Value or default value
-              Raises
-              ------
-              AristaAvdMissingVariableError
-                  If the key is not found and required == True
-              """
-
-              if org_key is None:
-                  org_key = key
-              keys = str(key).split(separator)
-              value = dictionary.get(keys[0])
-              if value is None:
-                  if required is True:
-                      raise TypeError(org_key)
-                  return default
-              else:
-                  if len(keys) > 1:
-                      return get(value, separator.join(keys[1:]), default=default, required=required, org_key=org_key, separator=separator)
-                  else:
-                      return value
-
-
-          def get_all(data, path: str, required: bool = False, org_path=None):
-              """
-              Get all values from data matching a data path.
-              Path supports dot-notation like "foo.bar" to do deeper lookups. Lists will be unpacked recursively.
-              Returns an empty list if the path is not found and required is False.
-              Parameters
-              ----------
-              data : any
-                  Data to walk through
-              path : str
-                  Data Path - supporting dot-notation for nested dictionaries/lists
-              required : bool
-                  Fail if the path is not found
-              org_path : str
-                  Internal variable used for raising exception with the full path even when called recursively
-              Returns
-              -------
-              list [ any ]
-                  List of values matching data path or empty list if no matches are found.
-              Raises
-              ------
-              AristaAvdMissingVariableError
-                  If the path is not found and required == True
-              """
-
-              if org_path is None:
-                  org_path = path
-
-              path_elements = str(path).split(".")
-              if isinstance(data, list):
-                  output = []
-                  for data_item in data:
-                      output.extend(get_all(data_item, path, required=required, org_path=org_path))
-
-                  return output
-
-              elif isinstance(data, dict):
-                  value = data.get(path_elements[0])
-
-                  if value is None:
-                      if required:
-                          raise TypeError(org_path)
-
-                      return []
-
-                  if len(path_elements) > 1:
-                      return get_all(value, ".".join(path_elements[1:]), required=required, org_path=org_path)
-
-                  else:
-                      return [value]
-
-              return []
+              elif str(text).strip().lower() in ["disable", "disabled", "no"]:
+                  return False
+              return None
 
 
           def get_item(list_of_dicts: list, key, value, default=None, required=False, case_sensitive=False, var_name=None):
@@ -445,409 +78,8 @@
               return default
 
 
-          from functools import reduce
-
-          def merge(a, b, path=None):
-              "merges b into a"
-              if path is None: path = []
-              for key in a:
-                  if key in ["parent_profile"]:
-                      continue
-
-                  if key in b and b[key] not in [None, "", [], {}]:
-                      if isinstance(a[key], dict) and isinstance(b[key], dict):
-                          merge(a[key], b[key], path + [str(key)])
-                      # elif a[key] == b[key]:
-                      #     pass # same leaf value
-                      # else:
-                      #     a[key] = b[key]
-                          # raise Exception(f'Conflict at {path + [str(key)]}.')
-                  else:
-                      b[key] = a[key]
-              return b
-
-
-          # def _strategy_keep(config, path, base, nxt):
-          #     """prefer base, otherwise nxt"""
-          #     if base is not None:
-          #         return base
-          #     return nxt
-
-
-          # def _strategy_prepend_unique(config, path, base, nxt):
-          #     """prepend nxt items without duplicates in base to base."""
-          #     nxt_as_set = set(nxt)
-          #     return nxt + [n for n in base if n not in nxt_as_set]
-
-
-          # MAP_ANSIBLE_LIST_MERGE_TO_DEEPMERGE_LIST_STRATEGY = {
-          #     "replace": "override",
-          #     "keep": _strategy_keep,
-          #     "append": "append",
-          #     "prepend": "prepend",
-          #     "append_rp": "append_unique",
-          #     "prepend_rp": _strategy_prepend_unique,
-          # }
-
-
-          # def merge(base, *nxt_list, recursive=True, list_merge="append", destructive_merge=True):  #, schema: AvdSchema = None):
-          #     if DEEPMERGE_IMPORT_ERROR:
-          #         raise Exception("This studio requires python deepmerge to be installed") from DEEPMERGE_IMPORT_ERROR
-
-          #     if not destructive_merge:
-          #         base = deepcopy(base)
-
-          #     if list_merge not in MAP_ANSIBLE_LIST_MERGE_TO_DEEPMERGE_LIST_STRATEGY:
-          #         raise Exception(f"merge: 'list_merge' argument can only be equal to one of {list(MAP_ANSIBLE_LIST_MERGE_TO_DEEPMERGE_LIST_STRATEGY.keys())}")
-
-          #     list_strategies = [MAP_ANSIBLE_LIST_MERGE_TO_DEEPMERGE_LIST_STRATEGY.get(list_merge, "append")]
-
-          #     if list_merge != "replace":  # and isinstance(schema, AvdSchema):
-          #         # If list_merge is not "replace" and we have a valid schema, we prepend the list_strategies
-          #         # with our schema based list merger "MergeOnSchema"
-          #         # If "primary_key" is not set and equal, we will fallback to the supplied "list_merge" strategy
-          #         merge_on_schema = MergeOnSchema(schema)
-          #         list_strategies.insert(0, merge_on_schema.strategy)
-
-          #     dict_strategies = ["merge" if recursive else "override"]
-
-          #     merger = Merger(
-          #         # List of tuples with strategies for each type
-          #         [(list, list_strategies), (dict, dict_strategies), (set, ["union"])],
-          #         # Fallback strategy applied to all other types
-          #         ["override"],
-          #         # Strategy for type conflict
-          #         ["override"],
-          #     )
-          #     for nxt in nxt_list:
-          #         if isinstance(nxt, list):
-          #             for nxt_item in nxt:
-          #                 if not destructive_merge:
-          #                     nxt_item = deepcopy(nxt_item)
-          #                 merger.merge(base, nxt_item)
-          #         else:
-          #             if not destructive_merge:
-          #                 nxt = deepcopy(nxt)
-          #             merger.merge(base, nxt)
-
-          #     return base
-
-
-          def strip_null_from_data(data, strip_values_tuple=(None,)):
-              """
-              strip_null_from_data Generic function to strip null entries regardless type of variable.
-              Parameters
-              ----------
-              data : Any
-                  Data to look for null content to strip out
-              Returns
-              -------
-              Any
-                  Cleaned data with no null.
-              """
-              if isinstance(data, dict):
-                  return strip_empties_from_dict(data, strip_values_tuple)
-              elif isinstance(data, list):
-                  return strip_empties_from_list(data, strip_values_tuple)
-              return data
-
-
-          def strip_empties_from_list(
-              data,
-              strip_values_tuple=(
-                  None,
-                  "",
-                  [],
-                  {},
-              ),
-          ):
-              """
-              strip_empties_from_list Remove entries with null value from a list
-              Parameters
-              ----------
-              data : Any
-                  data to filter
-              strip_values_tuple : tuple, optional
-                  Value to remove from data, by default (None, "", [], {},)
-              Returns
-              -------
-              Any
-                  Cleaned list with no strip_values_tuple
-              """
-              new_data = []
-              for v in data:
-                  if isinstance(v, dict):
-                      v = strip_empties_from_dict(v, strip_values_tuple)
-                  elif isinstance(v, list):
-                      v = strip_empties_from_list(v, strip_values_tuple)
-                  if v not in strip_values_tuple:
-                      new_data.append(v)
-              return new_data
-
-
-          def strip_empties_from_dict(
-              data,
-              strip_values_tuple=(
-                  None,
-                  "",
-                  [],
-                  {},
-              ),
-          ):
-              """
-              strip_empties_from_dict Remove entries with null value from a dict
-              Parameters
-              ----------
-              data : Any
-                  data to filter
-              strip_values_tuple : tuple, optional
-                  Value to remove from data, by default (None, "", [], {},)
-              Returns
-              -------
-              Any
-                  Cleaned dict with no strip_values_tuple
-              """
-              new_data = {}
-              for k, v in data.items():
-                  if isinstance(v, dict):
-                      v = strip_empties_from_dict(v, strip_values_tuple)
-                  elif isinstance(v, list):
-                      v = strip_empties_from_list(v, strip_values_tuple)
-                  if v not in strip_values_tuple:
-                      new_data[k] = v
-              return new_data
-
-
-          def str_to_bool(text):
-              if str(text).strip().lower() in ["enable", "enabled", "yes"]:
-                  return True
-              elif str(text).strip().lower() in ["disable", "disabled", "no"]:
-                  return False
-              return None
-
-
-          def convert(text):
-              return int(text) if text.isdigit() else text.lower()
-
-
-          def alphanum_key(key):
-              return [convert(c) for c in re.split('([0-9]+)', str(key))]
-
-
-          def natural_sort(iterable):
-              if iterable is None:
-                  return list()
-              return sorted(iterable, key=alphanum_key)
-
-
-          # ESI generators
-          def generate_esi(esi_short, esi_prefix='0000:0000:'):
-              return esi_prefix + esi_short
-
-
-          def generate_lacp_id(esi_short):
-              return esi_short.replace(':', '.')
-
-
-          def generate_route_target(esi_short):
-              """
-              generate_route_target Transform 3 octets ESI like 0303:0202:0101 to route-target
-              Parameters
-              ----------
-              esi : str
-                  Short ESI value as per AVD definition in eos_designs
-              Returns
-              -------
-              str
-                  String based on route-target format like 03:03:02:02:01:01
-              """
-              delimiter = ':'
-              esi = esi_short.replace(delimiter, "")
-              esi_split = re.findall('..', esi)
-              rt = ""
-              loop_cpt = 0
-              for esi_section in esi_split:
-                  loop_cpt += 1
-                  rt = rt + str(esi_section)
-                  if loop_cpt < len(esi_split):
-                      rt = rt + str(delimiter)
-              return rt
-
-
-          def range_expand(range_to_expand):
-              if not (isinstance(range_to_expand, list) or isinstance(range_to_expand, str)):
-                  raise AnsibleFilterError(
-                      f"value must be of type list or str, got {type(range_to_expand)}")
-
-              result = []
-
-              # If we got a list, unpack it and run this function recursively
-              if isinstance(range_to_expand, list):
-                  for r in range_to_expand:
-                      result.extend(range_expand(r))
-
-              # Must be a str now
-              else:
-                  prefix = ""
-
-                  # Unpack list in string
-                  for one_range in range_to_expand.split(','):
-                      if one_range is None:
-                          continue
-
-                      # Find prefix (if any)
-                      regex = r"^(.*?)(((\d+)-)?(\d+)\/)?(((\d+)-)?(\d+)\/)?(((\d+)-)?(\d+))(\.((\d+)-)?(\d+))?"
-                      # Number of groups in this regex.
-                      regex_groups = 17
-                      # Groups one-by-one:
-                      # Group 1  (.*?)                                                                           matches prefix ex. Ethernet, Eth, Po, Port-Channel
-                      # Group 2       (((\d+)-)?(\d+)\/)?                                                        matches module(s) and slash ex. 12/, 1-3/
-                      # Group 3        ((\d+)-)?                                                                 matches first module and dash ex. 1-
-                      # Group 4         (\d+)                                                                    matches first module ex. 1
-                      # Group 5                 (\d+)                                                            matches last module ex. 12, 3
-                      # Group 6                          (((\d+)-)?(\d+)\/)?                                     matches parent interface(s) and slash ex. 47/, 1-48/
-                      # Group 7                           ((\d+)-)?                                              matches parent interface(s) and dash ex. 47-
-                      # Group 8                            (\d+)                                                 matches first parent interface ex. 1
-                      # Group 9                                    (\d+)                                         matches last parent interface ex. 47, 48
-                      # Group 10                                            (((\d+)-)?(\d+))                     matches (breakout) interface(s) ex. 1, 1-4, 1-48
-                      # Group 11                                             ((\d+)-)?                           matches first interfaces and dash ex. 1-, 1-
-                      # Group 12                                              (\d+)                              matches first interface
-                      # Group 13                                                      (\d+)                      matches last interface ex. 1, 4, 48
-                      # Group 14                                                            (\.((\d+)-)?(\d+))?  matches dot and sub-interface(s) ex. .141, .12-15
-                      # Group 15                                                               ((\d+)-)?         matches first sub-interface and dash ex. 12-
-                      # Group 16                                                                (\d+)            matches first sub-interface ex. 12
-                      # Group 17                                                                        (\d+)    matches last sub-interface ex. 141, 15
-                      # Remember that the groups() object is 0-based and the group numbers above are 1-based
-                      search_result = re.search(regex, one_range)
-                      if search_result:
-                          if len(search_result.groups()) == regex_groups:
-                              groups = search_result.groups()
-                              first_module = last_module = None
-                              first_parent_interface = last_parent_interface = None
-                              first_interface = last_interface = None
-                              first_subinterface = last_subinterface = None
-                              # Set prefix if found (otherwise use last set prefix)
-                              if groups[0]:
-                                  prefix = groups[0]
-                              if groups[4]:
-                                  last_module = int(groups[4])
-                              if groups[3]:
-                                  first_module = int(groups[3])
-                              else:
-                                  first_module = last_module
-                              if groups[8]:
-                                  last_parent_interface = int(groups[8])
-                              if groups[7]:
-                                  first_parent_interface = int(groups[7])
-                              else:
-                                  first_parent_interface = last_parent_interface
-                              if groups[12]:
-                                  last_interface = int(groups[12])
-                              if groups[11]:
-                                  first_interface = int(groups[11])
-                              else:
-                                  first_interface = last_interface
-                              if groups[16]:
-                                  last_subinterface = int(groups[16])
-                              if groups[15]:
-                                  first_subinterface = int(groups[15])
-                              else:
-                                  first_subinterface = last_subinterface
-
-                              def expand_subinterfaces(interface_string):
-                                  result = []
-                                  if last_subinterface:
-                                      for subinterface in range(first_subinterface, last_subinterface + 1):
-                                          result.append(
-                                              f"{interface_string}.{subinterface}")
-                                  else:
-                                      result.append(interface_string)
-                                  return result
-
-                              def expand_interfaces(interface_string):
-                                  result = []
-                                  for interface in range(first_interface, last_interface + 1):
-                                      for res in expand_subinterfaces(f"{interface_string}{interface}"):
-                                          result.append(res)
-                                  return result
-
-                              def expand_parent_interfaces(interface_string):
-                                  result = []
-                                  if last_parent_interface:
-                                      for parent_interface in range(first_parent_interface, last_parent_interface + 1):
-                                          for res in expand_interfaces(f"{interface_string}{parent_interface}/"):
-                                              result.append(res)
-                                  else:
-                                      for res in expand_interfaces(f"{interface_string}"):
-                                          result.append(res)
-                                  return result
-
-                              def expand_module(interface_string):
-                                  result = []
-                                  if last_module:
-                                      for module in range(first_module, last_module + 1):
-                                          for res in expand_parent_interfaces(f"{interface_string}{module}/"):
-                                              result.append(res)
-                                  else:
-                                      for res in expand_parent_interfaces(f"{interface_string}"):
-                                          result.append(res)
-                                  return result
-
-                              result.extend(expand_module(prefix))
-
-                          else:
-                              raise AnsibleFilterError(
-                                  f"Invalid range, got {one_range} and found {search_result.groups()}")
-
-              return result
-
-
-          # returns dictionary of device to label value based on workspace tag assignments
-          def populate_single_value_dict(workspace_id, label):
-              sv_dict = {}
-              tsclient = ctx.getApiClient(tsgr.TagSearchStub)
-              tvsr = tspb.TagValueSearchRequest(
-                  label=label,
-                  workspace_id=workspace_id,
-                  topology_studio_request=True
-              )
-              for tag in tsclient.GetTagValueSuggestions(tvsr).tags:
-                  query = f"{tag.label}:\"{tag.value}\""
-                  tagmr = tspb.TagMatchRequestV2(
-                      query=query,
-                      workspace_id=workspace_id,
-                      topology_studio_request=True
-                  )
-                  tagmresp = tsclient.GetTagMatchesV2(tagmr)
-                  for match in tagmresp.matches:
-                      sv_dict[match.device.device_id] = tag.value
-              return sv_dict
-
-          # returns dictionary of device to label values based on workspace tag assignments
-          def populate_multi_value_dict(workspace_id, label):
-              mv_dict = {}
-              tsclient = ctx.getApiClient(tsgr.TagSearchStub)
-              tvsr = tspb.TagValueSearchRequest(
-                  label=label,
-                  workspace_id=workspace_id,
-                  topology_studio_request=True
-              )
-              for tag in tsclient.GetTagValueSuggestions(tvsr).tags:
-                  query = f"{tag.label}:\"{tag.value}\""
-                  tagmr = tspb.TagMatchRequestV2(
-                      query=query,
-                      workspace_id=workspace_id,
-                      topology_studio_request=True
-                  )
-                  tagmresp = tsclient.GetTagMatchesV2(tagmr)
-                  for match in tagmresp.matches:
-                      mv_dict.setdefault(match.device.device_id, []).append(tag.value)
-              return mv_dict
-
-
           def get_switch_basics_from_tags(device_id):
               switch_facts = {"serial_number": device_id}
-              switch_facts['network_services'] = {}
               tags_to_facts = {
                   "hostname": "hostname",
                   "model": "platform"
@@ -866,18 +98,6 @@
                               switch_facts[tags_to_facts[label]] = dev.modelName
                       continue
 
-
-              # Set platform settings
-              if not switch_facts.get('platform_settings'):
-                  # Set platform setting to the default platform_setting (the first platform setting in the list of default_platform_settings)
-                  switch_facts['platform_settings'] = default_platform_settings[0]
-                  # Attempt to match more specific platform_setting
-                  for platform_setting in default_platform_settings:
-                      # check to see if any default platform regex is matched
-                      for platform_regex in platform_setting['platforms']:
-                          if re.search(platform_regex, switch_facts['platform'], re.IGNORECASE):
-                              switch_facts['platform_settings'] = platform_setting
-
               return switch_facts
 
 
@@ -892,6 +112,7 @@
               for port_profile in port_profiles:
                   # ctx.info(f"Getting info for {port_profile['name']}")
                   tmp_port_profile = {"profile": port_profile["name"]}
+                  tmp_port_profile["structured_config"] = {}
                   # Parent profile
                   if port_profile.get("parentProfile", "").strip():
                       tmp_port_profile["parent_profile"] = port_profile["parentProfile"]
@@ -913,7 +134,7 @@
                   # phone trunk
                   if port_profile.get("phone"):
                       if port_profile["mode"] in ["trunk phone"] and port_profile["phone"].get("trunk"):
-                          tmp_port_profile["phone_trunk"] = port_profile["phone"]["trunk"]
+                          tmp_port_profile["structured_config"]["phone"] = {"trunk": port_profile["phone"]["trunk"]}
                   # vlans
                   if port_profile.get("vlans"):
                       # Native VLAN
@@ -921,7 +142,7 @@
                           tmp_port_profile["native_vlan"] = port_profile["vlans"]["nativeVlan"]
                       # Phone VLAN
                       if port_profile["mode"] in ["trunk phone"] and port_profile["vlans"].get("phoneVlan"):
-                          tmp_port_profile["phone_vlan"] = port_profile["vlans"]["phoneVlan"]
+                          tmp_port_profile["structured_config"]["phone"]["vlan"] = port_profile["vlans"]["phoneVlan"]
                       # VLANs
                       if port_profile["vlans"].get("vlans", "").strip():
                           tmp_port_profile["vlans"] = port_profile["vlans"]["vlans"]
@@ -1075,14 +296,14 @@
                   if port_profile.get("portChannel"):
                       port_channel = {}
                       # membership
-                      port_channel["member"] = port_profile["portChannel"].get("portChannel")
+                      port_channel["member"] = str_to_bool(port_profile["portChannel"].get("portChannel"))
                       if port_channel["member"]:
                           # mode
                           port_channel["mode"] = port_profile["portChannel"].get("portChannelMode")
                           # channel id
                           # port_channel["channel_id"] = port_profile["portChannel"]["portChannelId"]
                           # enabled
-                          port_channel["enabled"] = port_profile["portChannel"]["portChannelEnabled"]
+                          port_channel["enabled"] = str_to_bool(port_profile["portChannel"]["portChannelEnabled"])
                           # lacp fallback
                           if port_profile["portChannel"].get("lacpFallback"):
                               if port_profile["portChannel"]["lacpFallback"].get("lacpFallbackMode", ""):
@@ -1091,7 +312,7 @@
                                       "timeout": port_profile["portChannel"]["lacpFallback"].get("timeout")
                                   }
                           # mlag
-                          port_channel["mlag"] = port_profile["portChannel"].get("mlag")
+                          port_channel["mlag"] = str_to_bool(port_profile["portChannel"].get("mlag"))
                           # EOS CLI
                           if len(port_profile["portChannel"].get("eosCli", [])) > 0:
                               port_channel["raw_eos_cli"] = "\n".join(port_profile["portChannel"]["eosCli"])
@@ -1103,26 +324,7 @@
               return avd_port_profiles
 
 
-          def merge_port_profiles(port_profiles):
-              """
-              Return list of merged "port_profiles" where "parent_profile" has been applied.
-              """
-              merged_port_profiles = []
-
-              for port_profile in port_profiles:
-                  if "parent_profile" in port_profile:
-                      parent_profile = get_item(port_profiles, "profile", port_profile["parent_profile"], default={})
-                      # Notice reusing the same variable, but assigning a new instance with the merged port_profile
-                      # port_profile = merge(parent_profile, port_profile, list_merge="replace", destructive_merge=False)
-                      port_profile = merge(parent_profile, port_profile)
-                      if "parent_profile" in port_profile:
-                          port_profile.pop("parent_profile")
-                  merged_port_profiles.append(port_profile)
-
-              return merged_port_profiles
-
-
-          def get_network_ports(network_ports):
+          def get_network_ports(network_ports, hostname):
               '''
               Returns list of network_ports in AVD connected endpoints data model format
               '''
@@ -1131,13 +333,12 @@
               avd_network_ports = []
               for network_port in network_ports:
                   # ctx.info(f"Getting info for {network_port['name']}")
-                  tmp_network_port = {"name": network_port["name"]}
-                  tmp_network_port["switch_ports"] = [network_port["name"]]
+                  tmp_network_port = {"structured_config": {}}
                   # port profile
                   if network_port.get("portProfile", "").strip():
                       tmp_network_port["profile"] = network_port["portProfile"]
                   # Description
-                  if network_port.get("description", "").strip():
+                  if network_port.get("description", "").strip() != "":
                       tmp_network_port["description"] = network_port["description"]
                   # Enable/Disable
                   if network_port.get("enabled", "").strip():
@@ -1154,7 +355,7 @@
                   # Phone trunk
                   if network_port.get("phone"):
                       if network_port["mode"] in ["trunk phone"] and network_port["phone"].get("trunk"):
-                          tmp_network_port["phone_trunk"] = network_port["phone"]["trunk"]
+                          tmp_network_port["structured_config"]["phone"] = {"trunk": network_port["phone"]["trunk"]}
                   # vlans
                   if network_port.get("vlans"):
                       # Native VLAN
@@ -1162,7 +363,7 @@
                           tmp_network_port["native_vlan"] = network_port["vlans"]["nativeVlan"]
                       # Phone VLAN
                       if network_port["mode"] in ["trunk phone"] and network_port["vlans"].get("phoneVlan"):
-                          tmp_network_port["phone_vlan"] = network_port["vlans"]["phoneVlan"]
+                          tmp_network_port["structured_config"]["phone"]["vlan"] = network_port["vlans"]["phoneVlan"]
                       # VLANs
                       if network_port["vlans"].get("vlans", "").strip():
                           tmp_network_port["vlans"] = network_port["vlans"]["vlans"]
@@ -1196,8 +397,7 @@
                       }
                       # Need to set the below to null so we remove unconfigured interfaces from output
                       if not tmp_network_port["ptp"]["enabled"]:
-                          tmp_network_port["ptp"]["profile"] = None
-                          tmp_network_port["ptp"]["endpoint_role"] = None
+                          del tmp_network_port["ptp"]
                   # Dot1x
                   if network_port.get("dot1x"):
                       tmp_network_port["dot1x"] = {
@@ -1285,6 +485,9 @@
                           tmp_network_port["poe"]["shutdown"] = {
                             "action": network_port["poe"]["shutdownAction"]
                           }
+                      # delete if not set
+                      if tmp_network_port["poe"] == {}:
+                          del tmp_network_port["poe"]
                   # Storm Control
                   if network_port.get("stormControl"):
                       tmp_network_port["storm_control"] = {}
@@ -1312,21 +515,31 @@
                               "level": network_port["stormControl"]["unknownUnicast"]["level"],
                               "unit":  network_port["stormControl"]["unknownUnicast"].get("unit", "percent")
                           }
+                      # delete if not set
+                      if tmp_network_port["storm_control"] == {}:
+                          del tmp_network_port["storm_control"]
                   # EOS CLI
                   if len(network_port.get("eosCli", [])) > 0:
                       tmp_network_port["raw_eos_cli"] = "\n".join(network_port["eosCli"])
                   # port-channel
                   if network_port.get("portChannel"):
                       port_channel = {}
+                      profile = get_item(port_profiles, "profile", tmp_network_port.get("profile", ""), default={})
                       # membership
-                      port_channel["member"] = network_port["portChannel"].get("portChannel")
+                      port_channel["member"] = str_to_bool(network_port["portChannel"].get("portChannel"))
+                      if port_channel["member"] is None:
+                          port_channel["member"] = profile.get("port_channel", {}).get("member")
                       if port_channel["member"]:
                           # mode
-                          port_channel["mode"] = network_port["portChannel"].get("portChannelMode")
+                          if network_port["portChannel"].get("portChannelMode"):
+                              port_channel["mode"] =  network_port["portChannel"]["portChannelMode"]
                           # channel id
-                          port_channel["channel_id"] = network_port["portChannel"].get("portChannelId")
+                          if network_port["portChannel"].get("portChannelId"):
+                              port_channel["channel_id"] = network_port["portChannel"].get("portChannelId")
+                          else:
+                              port_channel["channel_id"] = int("".join(re.findall(r"\d", network_port["name"])))
                           # enabled
-                          port_channel["enabled"] = network_port["portChannel"].get("portChannelEnabled")
+                          port_channel["enabled"] = str_to_bool(network_port["portChannel"].get("portChannelEnabled"))
                           # lacp fallback
                           if network_port["portChannel"].get("lacpFallback"):
                               if network_port["portChannel"]["lacpFallback"].get("lacpFallbackMode", ""):
@@ -1335,380 +548,51 @@
                                       "timeout": network_port["portChannel"]["lacpFallback"].get("timeout")
                                   }
                           # mlag
-                          port_channel["mlag"] = network_port["portChannel"].get("mlag")
+                          port_channel["mlag"] = str_to_bool(network_port["portChannel"].get("mlag"))
+                          if port_channel["mlag"] is True:
+                              port_channel["structured_config"] = {
+                                  "mlag": port_channel["channel_id"]
+                              }
+                          elif port_channel["mlag"] is None:
+                              if profile.get("port_channel", {}).get("mlag") is True:
+                                  port_channel["structured_config"] = {
+                                      "mlag": port_channel["channel_id"]
+                                  }     
                           # EOS CLI
                           if len(network_port["portChannel"].get("eosCli", [])) > 0:
                               port_channel["raw_eos_cli"] = "\n".join(network_port["portChannel"]["eosCli"])
 
                       tmp_network_port["port_channel"] = port_channel
 
-                  avd_network_ports.append(tmp_network_port)
+                  if tmp_network_port != {"structured_config": {}}:
+                      tmp_network_port["switches"] = [hostname]
+                      tmp_network_port["switch_ports"] = [network_port["name"]]
+                      avd_network_ports.append(tmp_network_port)
 
               return avd_network_ports
 
 
-          def merge_network_ports(network_ports, port_profiles):
-              """
-              Return list of merged "network_ports" where "port_profile" has been applied.
-              """
-              merged_network_ports = []
+          def clean_structured_config(data: dict) -> None:
+              '''
+                  Remove unneccesary keys from the pyavd generated structured_config
+              '''
+              data["generate_default_config"] = False
+              keys_to_pop = [ "service_routing_protocols_model", "vlan_internal_order", "hostname", "vrfs", "management_api_http"]
+              for k in keys_to_pop:
+                  data.pop(k, None)
+              for iface in data.get("ethernet_interfaces", []):
+                  if not iface.get("description"):
+                      del iface["description"]
+              for iface in data.get("port_channel_interfaces", []):
+                  if not iface.get("description"):
+                      del iface["description"]
 
-              for network_port in network_ports:
-                  if "profile" in network_port:
-                      port_profile = get_item(port_profiles, "profile", network_port["profile"], default={})
-                      # Notice reusing the same variable, but assigning a new instance with the merged port_profile
-                      # port_profile = merge(parent_profile, port_profile, list_merge="replace", destructive_merge=False)
-                      network_port = merge(port_profile, network_port)
-                      if "port_profile" in network_port:
-                          network_port.pop("port_profile")
-                  merged_network_ports.append(network_port)
-
-              return merged_network_ports
-
-
-          def get_adapter_dot1x(adapter: dict) -> dict | None:
-              """
-              Return dot1x for one adapter
-              """
-              if not get(adapter, "dot1x.enabled"):
-                  return None
-              adapter.get("dot1x").pop("enabled")
-
-              return adapter.get("dot1x")
-
-          def get_adapter_ptp(adapter: dict) -> dict | None:
-              """
-              Return ptp for one adapter
-              """
-              if get(adapter, "ptp.enabled") is not True:
-                  return None
-
-              ptp_config = {}
-
-              # Apply PTP profile config
-              ptp_profile_name = get(adapter, "ptp.profile", default=ptp_profile)
-              if ptp_profile_name:
-                  ptp_config.update(get_item(ptp_profiles, "profile", ptp_profile_name, default={}))
-
-              ptp_config["enable"] = True
-
-              if get(adapter, "ptp.endpoint_role") != "bmca":
-                  ptp_config["role"] = "master"
-
-              ptp_config.pop("profile", None)
-
-              return ptp_config
-
-
-          def platform_settings_feature_support_interface_storm_control() -> bool:
-              return get(my_switch_facts, "platform_settings.feature_support.interface_storm_control", default=True) is True
-
-
-          def get_adapter_storm_control(adapter: dict) -> dict | None:
-              """
-              Return storm_control for one adapter
-              """
-              if platform_settings_feature_support_interface_storm_control():
-                  return get(adapter, "storm_control")
-
-              return None
-
-
-          def platform_settings_feature_support_poe() -> bool:
-              return get(my_switch_facts, "platform_settings.feature_support.poe", default=False) is True
-
-
-          def get_adapter_poe(adapter: dict) -> dict | None:
-              """
-              Return storm_control for one adapter
-              """
-              adapter_poe = get(adapter, "poe")
-              if platform_settings_feature_support_poe() and adapter_poe != {}:
-                  return adapter_poe
-
-              return None
-
-
-          def platform_settings_feature_support_phone() -> bool:
-              return get(my_switch_facts, "platform_settings.feature_support.phone", default=False) is True
-
-
-          def get_adapter_phone(adapter: dict) -> dict | None:
-              """
-              Return phone for one adapter
-              """
-              # Check to see if feature is supported
-              if platform_settings_feature_support_phone() is False:
-                  if adapter.get("phone_vlan"):
-                      ctx.warning(f"{adapter['switch_ports'][0]} is configured with `phone vlan {adapter['phone_vlan']}` but this device model does not support this feature.")
-                  if adapter.get("phone_trunk"):
-                      ctx.warning(f"{adapter['switch_ports'][0]} is configured with `phone trunk {adapter['phone_trunk']}` but this device model does not support this feature.")
-                  return
-
-              phone_config = {}
-              if adapter.get("phone_vlan"):
-                  phone_config["vlan"] = adapter["phone_vlan"]
-
-              if adapter.get("phone_trunk"):
-                  phone_config["trunk"] = adapter["phone_trunk"]
-
-              if phone_config != {}:
-                  return phone_config
-
-              return None
-
-
-          def get_adapter_mode(adapter: dict) -> dict | None:
-              """
-              Return interface mode for one adapter
-              """
-              if adapter.get("mode") == "trunk phone" and platform_settings_feature_support_phone() is False:
-                  ctx.warning(f"{adapter['switch_ports'][0]} is configured with mode {adapter['mode']} but this device model does not support this feature.")
-                  return None
-
-              return adapter.get("mode")
-
-
-          def get_ethernet_interface_cfg(adapter, node_index=None, connected_endpoint=None):
-              """
-              Return structured_config for one ethernet_interface
-              """
-              # peer = connected_endpoint["name"]
-              # endpoint_ports: list = default(
-              #     adapter.get("endpoint_ports"),
-              #     adapter.get("server_ports"),
-              #     [],
-              # )
-              # peer_interface = endpoint_ports[node_index] if node_index < len(endpoint_ports) else None
-              default_channel_group_id = int("".join(re.findall(r"\d", adapter["switch_ports"][0])))
-              channel_group_id = get(adapter, "port_channel.channel_id", default=default_channel_group_id)
-              # short_esi = self._get_short_esi(adapter, channel_group_id)
-
-              # Common ethernet_interface settings
-              # TODO: avoid generating redundant structured config for port-channel members
-              ethernet_interface = {
-                  # "peer": peer,
-                  # "peer_interface": peer_interface,
-                  "peer_type": connected_endpoint["type"],
-                  "port_profile": adapter.get("profile"),
-                  "description": adapter.get("description"),
-                  "speed": adapter.get("speed"),
-                  "mtu": adapter.get("mtu"),
-                  "l2_mtu": adapter.get("l2_mtu"),
-                  "type": "switched",
-                  "shutdown": not adapter.get("enabled", True),
-                  "mode": get_adapter_mode(adapter),
-                  "vlans": adapter.get("vlans"),
-                  # "trunk_groups": self._get_adapter_trunk_groups(adapter, connected_endpoint),
-                  "native_vlan_tag": adapter.get("native_vlan_tag"),
-                  "native_vlan": adapter.get("native_vlan"),
-                  "phone": get_adapter_phone(adapter),
-                  "spanning_tree_portfast": adapter.get("spanning_tree_portfast"),
-                  "spanning_tree_bpdufilter": adapter.get("spanning_tree_bpdufilter"),
-                  "spanning_tree_bpduguard": adapter.get("spanning_tree_bpduguard"),
-                  "storm_control": get_adapter_storm_control(adapter),
-                  "service_profile": adapter.get("qos_profile"),
-                  "dot1x": get_adapter_dot1x(adapter),
-                  "ptp": get_adapter_ptp(adapter),
-                  "poe": get_adapter_poe(adapter),
-                  "eos_cli": adapter.get("raw_eos_cli"),
-                  "struct_cfg": adapter.get("structured_config"),
-              }
-              # Port-channel member
-              port_channel_mode = get(adapter, "port_channel.mode")
-              if port_channel_mode:
-                  ethernet_interface["channel_group"] = {
-                      "id": channel_group_id,
-                      "mode": port_channel_mode,
-                  }
-                  # if get(adapter, "port_channel.lacp_fallback.mode") == "static":
-                  #     ethernet_interface["lacp_port_priority"] = 8192 if node_index == 0 else 32768
-
-              # # NOT a port-channel member
-              # else:
-              #     ethernet_interface.update(
-              #         {
-              #             "evpn_ethernet_segment": self._get_adapter_evpn_ethernet_segment_cfg(
-              #                 adapter, short_esi, node_index, connected_endpoint, "auto", "single-active"
-              #             ),
-              #             "link_tracking_groups": self._get_adapter_link_tracking_groups(adapter),
-              #         }
-              #     )
-
-              # More common ethernet_interface settings
-              if (flowcontrol_received := get(adapter, "flowcontrol.received")) is not None:
-                  ethernet_interface["flowcontrol"] = {"received": flowcontrol_received}
-
-              return strip_null_from_data(ethernet_interface, strip_values_tuple=(None, "", {}, []))
-
-
-          def ethernet_interfaces(network_ports) -> dict | None:
-              """
-              Return structured config for ethernet_interfaces
-              """
-              ethernet_interfaces = {}
-
-              for network_port in network_ports:
-                  connected_endpoint = {
-                      "name": network_port.get("description"),
-                      "type": "network_port",
-                  }
-                  for ethernet_interface_name in range_expand(network_port["switch_ports"]):
-                      # Override switches and switch_ports to only render for a single interface
-                      tmp_network_port = ChainMap(
-                          {
-                              "switch_ports": [ethernet_interface_name]
-                              # "switches": [my_switch_facts["hostname"]],
-                          },
-                          network_port,
-                      )
-                      ethernet_interface = get_ethernet_interface_cfg(tmp_network_port, 0, connected_endpoint)
-                      # Only add the interface to the ethernet_interfaces dictionary if it does not contain the default interface config
-                      if ethernet_interface != {'peer_type': 'network_port', 'type': 'switched', 'shutdown': False}:
-                          ethernet_interfaces[ethernet_interface_name] = ethernet_interface
-
-              if ethernet_interfaces:
-                  return ethernet_interfaces
-
-              return []
-
-
-          def add_if_not_duplicate(candidate_port_channel_config, port_channel_interfaces) -> None:
-              """
-              This function assumes that port_channel_interfaces list DO NOT contain duplicate port-channel names.
-              It CAN modify the input variable port_channel_interfaces by appending candidate_port_channel_config to it.
-              This check function does two things:
-                  1. Check if the candidate_port_channel_config["name"] is already present in port_channel_interfaces computed so far
-                  2. if 1 is True, check if the candidate_port_channel_config object is exactly the same as the existing one in port_channel_interfaces,
-              If 1 is True and 2 is False, then the function raise an AristaAvdError because a duplicate port-channel name would be generating two
-              different structured configurations and so there is a conflict
-              If 1 and 2 are True, it means the candidate_port_channel_config is the same as the existing configuration already generated so no
-              action is needed.
-              If 1 is False for every port-channel in the port_channel_interfaces, it is a new port-channel and it is appended to the list.
-              """
-              matching_port_channel_config = get_item(port_channel_interfaces, "name", candidate_port_channel_config["name"])
-              if matching_port_channel_config is None:
-                  # No port_channel_interface found with the same name in port_channel_interfaces
-                  # append to the list and return
-                  port_channel_interfaces.append(candidate_port_channel_config)
-                  return
-
-              if matching_port_channel_config != candidate_port_channel_config:
-                  # Found duplicate name with different generated configs
-                  raise Exception(
-                      f"Duplicate port-channel name {port_channel_interfaces['name']} with conflicting configurations found while generating port-channels for"
-                      " connected-endpoints or network-ports"
-                  )
-
-              # Duplicate name with same configuration - nothing to do
-              return
-
-
-          def get_port_channel_interface_cfg(adapter: dict, port_channel_interface_name: str, channel_group_id: int, connected_endpoint: dict) -> dict:
-              """
-              Return structured_config for one port_channel_interface
-              """
-
-              peer = connected_endpoint["name"]
-              adapter_port_channel_description = get(adapter, "port_channel.description")
-              port_channel_type = "routed" if get(adapter, "port_channel.subinterfaces") else "switched"
-              port_channel_mode = get(adapter, "port_channel.mode")
-              node_index = my_switch_facts.get("node_id", 0) # adapter["switches"].index(self._hostname)
-
-              # Common port_channel_interface settings
-              port_channel_interface = {
-                  "name": port_channel_interface_name,
-                  "description": adapter.get("description"),  # self.avd_interface_descriptions.connected_endpoints_port_channel_interfaces(peer, adapter_port_channel_description),
-                  "type": port_channel_type,
-                  "shutdown": not get(adapter, "port_channel.enabled", default=True),
-                  "mtu": adapter.get("mtu"),
-                  "service_profile": adapter.get("qos_profile"),
-                  # "link_tracking_groups": get_adapter_link_tracking_groups(adapter),
-                  "eos_cli": get(adapter, "port_channel.raw_eos_cli"),
-                  "struct_cfg": get(adapter, "port_channel.structured_config"),
-              }
-
-              # Only switches interfaces
-              if port_channel_type == "switched":
-                  port_channel_interface.update(
-                      {
-                          "mode": adapter.get("mode"),
-                          "l2_mtu": adapter.get("l2_mtu"),
-                          "vlans": adapter.get("vlans"),
-                          # "trunk_groups": get_adapter_trunk_groups(adapter, connected_endpoint),
-                          "native_vlan_tag": adapter.get("native_vlan_tag"),
-                          "native_vlan": adapter.get("native_vlan"),
-                          "spanning_tree_portfast": adapter.get("spanning_tree_portfast"),
-                          "spanning_tree_bpdufilter": adapter.get("spanning_tree_bpdufilter"),
-                          "spanning_tree_bpduguard": adapter.get("spanning_tree_bpduguard"),
-                          "storm_control": get_adapter_storm_control(adapter),
-                          "phone": get_adapter_phone(adapter),
-                          # "dot1x": get_adapter_dot1x(adapter),
-                          "ptp": get_adapter_ptp(adapter)
-                      }
-                  )
-
-              # EVPN A/A
-              # if (short_esi := self._get_short_esi(adapter, channel_group_id)) is not None:
-              #     port_channel_interface["evpn_ethernet_segment"] = get_adapter_evpn_ethernet_segment_cfg(adapter, short_esi, node_index, connected_endpoint)
-              #     if port_channel_mode == "active":
-              #         port_channel_interface["lacp_id"] = generate_lacp_id(short_esi)
-
-              # Set MLAG ID on port-channel if connection is multi-homed and this switch is running MLAG
-              if get(adapter, "port_channel.mlag"):
-                  port_channel_interface["mlag"] = channel_group_id
-
-              # LACP Fallback
-              lacp_fallback_mode = get(adapter, "port_channel.lacp_fallback.mode")
-              if port_channel_mode in ["active", "passive"] and lacp_fallback_mode and lacp_fallback_mode == "static":
-                  port_channel_interface.update(
-                      {
-                          "lacp_fallback_mode": lacp_fallback_mode,
-                          "lacp_fallback_timeout": get(adapter, "port_channel.lacp_fallback.timeout", default=90),
-                      }
-                  )
-
-              return strip_null_from_data(port_channel_interface)
-
-
-          def port_channel_interfaces(network_ports) -> dict | None:
-              """
-              Return structured config for ethernet_interfaces
-              """
-              port_channel_interfaces = []
-
-              for network_port in network_ports:
-                  if not get(network_port, "port_channel.member"):
-                      continue
-                  connected_endpoint = {
-                      "name": network_port.get("description"),
-                      "type": "network_port",
-                  }
-                  for ethernet_interface_name in range_expand(network_port["switch_ports"]):
-                      # Override switches and switch_ports to only render for a single interface
-                      tmp_network_port = ChainMap(
-                          {
-                              "switch_ports": [ethernet_interface_name]
-                              # "switches": [my_switch_facts["hostname"]],
-                          },
-                          network_port,
-                      )
-
-                      default_channel_group_id = int("".join(re.findall(r"\d", ethernet_interface_name)))
-                      channel_group_id = get(tmp_network_port, "port_channel.channel_id", default=default_channel_group_id)
-                      port_channel_interface_name = f"Port-Channel{channel_group_id}"
-                      port_channel_config = get_port_channel_interface_cfg(tmp_network_port, port_channel_interface_name, channel_group_id, connected_endpoint)
-                      # ctx.info(f"{port_channel_interface_name} Config: {port_channel_config}")
-                      add_if_not_duplicate(port_channel_config, port_channel_interfaces)
-
-              if port_channel_interfaces:
-                  return port_channel_interfaces
-
-              return []
 
           # Check devices input is not None
           if not campus:
               return
+
+          # ctx.info(f"PyAVD Version: {pyavd.VERSION}:{pyavd.PYAVD_VERSION}")
 
           my_device = ctx.getDevice()
           workspace_id = ctx.studio.workspaceId
@@ -1733,16 +617,11 @@
 
           # get my_switch_facts from tags
           my_switch_facts = get_switch_basics_from_tags(my_device.id)
-
-          ctx.info(f"My Switch Facts: {my_switch_facts}")
+          hostname = my_switch_facts["hostname"]
 
           # Convert port profiles to eos_designs AVD data model
           port_profiles = get_port_profiles(portProfiles)
-          ctx.info(f"Port Profiles Pre-Parent Profile Applied: {port_profiles}")
-
-          # Merge port profiles
-          port_profiles = merge_port_profiles(port_profiles)
-          ctx.info(f"Port Profiles Post-Parent Profile Applied: {port_profiles}")
+          # ctx.info(f"Port Profiles Pre-Parent Profile Applied: {json.dumps(port_profiles)}")
 
           # get my_switch_facts network_ports
           network_ports = []
@@ -1755,28 +634,30 @@
                   tmp_adapter["name"] = interface_name
                   network_ports.append(tmp_adapter)
 
-
           # Convert network ports to eos_designs AVD data model
-          network_ports = get_network_ports(network_ports)
-          ctx.info(f"Network Ports Pre-Profile Applied: {network_ports}")
+          network_ports = get_network_ports(network_ports, hostname)
+          # ctx.info(f"Network Ports Pre-Profile Applied: {json.dumps(network_ports)}")
 
-          # Apply port profiles to network ports
-          network_ports = merge_network_ports(network_ports, port_profiles)
-          ctx.info(f"Network Ports Post-Profile Applied: {network_ports}")
-
-          # Get structured config for ethernet_interfaces
-          my_switch_ethernet_interfaces = ethernet_interfaces(network_ports)
-          # Get structured config for port_channel_interfaces
-          my_switch_port_channel_interfaces = port_channel_interfaces(network_ports)
-
-          structured_config = {
-              "generate_default_config": False,
-              "hostname": my_switch_facts["hostname"],
-              "ethernet_interfaces": convert_dicts(my_switch_ethernet_interfaces),
-              "port_channel_interfaces": convert_dicts(my_switch_port_channel_interfaces),
+          host_vars = {
+              "fabric_name": "network_ports",
+              "type": "l2leaf",
+              "l2leaf": {},
+              "port_profiles": port_profiles,
+              "network_ports": network_ports
           }
 
+          pyavd.validate_inputs(host_vars)
+
+          all_info = {hostname: host_vars}
+          avd_facts = pyavd.get_avd_facts(all_info)
+          # ctx.info(f"{json.dumps(avd_facts)}")
+          # ctx.info(f"{json.dumps(host_vars)}")
+
+          structured_config = pyavd.get_device_structured_config(hostname, host_vars, avd_facts)
+          clean_structured_config(structured_config)
+          # ctx.info(f"{json.dumps(structured_config)}")
           config = pyavd.get_device_config(structured_config)
+          # ctx.info(f"{config}")
           %>
           % if config:
           ${config}
